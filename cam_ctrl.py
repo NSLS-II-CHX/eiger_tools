@@ -1,4 +1,9 @@
+import sys
+sys.path.insert(0,"/usr/local/dectris/python")
+import dectris.albula
 from eigerclient import DEigerClient
+import requests
+
 from epics import PV
 
 
@@ -22,48 +27,71 @@ class Eiger(object):
         self.num_img = 1
         self.count_time = 1
         self.seq_id = 0
+        self.initialized = False
 
-    def initialize(self, photon_energy=9000):
+    def initialize(self, photon_energy=9000, threshold=9000/2.0):
         self.eigerclient = DEigerClient(host=self.ipaddr)
-        print "Initialize the EIGER"
+        # NOTE: initialize twice to get rid of the 'zebras'
+        print "Initialize the EIGER 1st time"
         self.eigerclient.sendDetectorCommand("initialize")
-        print "Set energy to %.3f keV" % photon_energy/1000.0 
-        self.photon_energy = photon_energy
         self.eigerclient.setDetectorConfig("photon_energy", photon_energy)
+        self.photon_energy = photon_energy
+        self.eigerclient.setDetectorConfig("threshold_energy", threshold) # added
+        self.threshold = threshold # added
+        # take short initial exposure to prep flatfield calibration.
+        # NOTE: assumes (and recommends !!!) shutter is closed
+        self.expose(0.001, 1)
+        print "Initialize the EIGER 2nd time"
+        self.eigerclient.sendDetectorCommand("initialize")
+        self.eigerclient.setDetectorConfig("photon_energy", photon_energy)
+        self.photon_energy = photon_energy
+        self.eigerclient.setDetectorConfig("threshold_energy", threshold) # added
+        self.threshold = threshold # added
+        self.initialized = True
+        self.expose(0.001, 1)
+        print "EIGER successfully Initialized for " + str(photon_energy/1000.0) + "keV, using threshold: "+str(threshold/1000.0) +"keV"
+        print "No Zebras expected! :-)"
+        
+    def is_initialized(self):
+        return self.initialized
 
     def set_photon_energy(self, energy):
         self.eigerclient.setDetectorConfig("photon_energy", photon_energy)
         self.photon_energy = photon_energy
-        print "Set energy to %.3f keV" % photon_energy/1000.0
+    def set_threshold(self, threshold): #added
+        self.eigerclient.setDetectorConfig("threshold_energy", threshold)   #added
+        self.threshold = threshold    #added
+        
 
     # method assumes set_photon_energy() has been called previously
+    # try: method assumes that set_threshold() has been called previously
     def expose(self, exposure_time, num_img=1, threshold = None, flatfield = 1):
         if (threshold == None):
-            self.eigerclientsetDetectorConfig("threshold_energy",self.photon_energy/2.0)
+            self.eigerclient.setDetectorConfig("threshold_energy",self.threshold) # changed from 'self.photon_energy/2.0'
         else:
-            self.eigerclientsetDetectorConfig("threshold_energy",threshold)
-        self.eigerclientsetDetectorConfig("flatfield_correction_applied",flatfield)
-        self.eigerclientsetDetectorConfig("nimages",num_img)
+            self.eigerclient.setDetectorConfig("threshold_energy",threshold)
+        self.eigerclient.setDetectorConfig("flatfield_correction_applied",flatfield)
+        self.eigerclient.setDetectorConfig("nimages",num_img)
         if (num_img == 1):
-            self.eigerclientsetDetectorConfig("count_time",exposure_time)
+            self.eigerclient.setDetectorConfig("count_time",exposure_time)
         else:
-            self.eigerclientsetDetectorConfig("frame_time",exposure_time)
-            self.eigerclientsetDetectorConfig("count_time",exposure_time-0.000020)
-        self.seq_id = self.eigerclientsendDetectorCommand("arm")['sequence id']
+            self.eigerclient.setDetectorConfig("frame_time",exposure_time)
+            self.eigerclient.setDetectorConfig("count_time",exposure_time-0.000020)
+        self.seq_id = self.eigerclient.sendDetectorCommand("arm")['sequence id']
         print "Detector triggered " + str(num_img) + " image(s) of " + str(exposure_time) + "s"
-        self.eigerclientsendDetectorCommand("trigger")
-        self.eigerclientsendDetectorCommand("disarm")
+        self.eigerclient.sendDetectorCommand("trigger")
+        self.eigerclient.sendDetectorCommand("disarm")
         print "data recorded"
 
-        ct = self.eigerclientdetectorConfig("count_time")
-        ft = self.eigerclientdetectorConfig("frame_time")
-        thresh = self.eigerclientdetectorConfig("threshold_energy")
-        print "used frame time: " + str(ft['value'])
-        print "used count time: " + str(ct['value'])
-        print "used threshold : " + str(thresh['value'])
+        ct = self.eigerclient.detectorConfig("count_time")
+        ft = self.eigerclient.detectorConfig("frame_time")
+        thresh = self.eigerclient.detectorConfig("threshold_energy")
+        print "used frame time: " + str(ft['value']) +"s"
+        print "used count time: " + str(ct['value']) +"s"
+        print "used threshold : " + str(thresh['value']/1000.0) +"keV"
         
     def download_data(self, storage_path, show_image=1):
-        file_name = e.fileWriterConfig("name_pattern")['value'].replace("$id",str(self.seq_id))
+        file_name = self.eigerclient.fileWriterConfig("name_pattern")['value'].replace("$id",str(self.seq_id))
         # FIXME -- put some f'ing error checking in here!!
         fm = requests.get("http://{0}/data/{1}_master.h5".format(self.ipaddr,file_name))
         open("{0}/{1}_master.h5".format(storage_path,file_name),"wb").write(fm.content)
@@ -88,16 +116,22 @@ class Eiger(object):
             except:
                 print "albula got closed"
 
-    
-def loopscan(ct, nimg=1):
-    storage_path = '/home/chx/data/032714'
-    shttr = Shutter()
-    eiger = Eiger(ipaddr="164.54.124.191")
+eiger = Eiger(ipaddr="164.54.124.191")
 
-    eiger.initialize(photon_energy=9000)
+def loopscan(ct, nimg=1):
+    storage_path = '/home/chx/data'
+    shttr = Shutter()
+
+    if not eiger.is_initialized():
+        eiger.initialize(photon_energy=9000)
+        "EIGER Initialized for " + str(photon_energy/1000.0) + "keV"
     shttr.open()
-    eiger.expose(ct, nimg)
-    shttr.close()
+
+    try:
+        eiger.expose(ct, nimg)
+    except:
+        shttr.close()
+        raise "Bailing out! Exposure failed!!!"
     eiger.download_data(storage_path)
 
 
