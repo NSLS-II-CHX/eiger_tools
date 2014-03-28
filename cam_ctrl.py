@@ -4,20 +4,6 @@ import dectris.albula
 from eigerclient import DEigerClient
 import requests
 
-from epics import PV
-
-
-class Shutter(object):
-    def __init__(self):
-        self.out_pv = PV('34idc:softGlue:OR-1_IN2_Signal')
-
-    def open(self):
-        self.out_pv.put(str(1))
-
-    def close(self):
-        self.out_pv.put(str(0))
-
-
 class Eiger(object):
     def __init__(self, ipaddr="164.54.124.191"):
         self.ipaddr = ipaddr
@@ -117,22 +103,5 @@ class Eiger(object):
                 print "albula got closed"
 
 eiger = Eiger(ipaddr="164.54.124.191")
-
-def loopscan(ct, nimg=1):
-    storage_path = '/home/chx/data'
-    shttr = Shutter()
-
-    if not eiger.is_initialized():
-        eiger.initialize(photon_energy=9000)
-        "EIGER Initialized for " + str(photon_energy/1000.0) + "keV"
-    shttr.open()
-
-    try:
-        eiger.expose(ct, nimg)
-    except:
-        shttr.close()
-        raise "Bailing out! Exposure failed!!!"
-    shttr.close()
-    eiger.download_data(storage_path)
 
 
