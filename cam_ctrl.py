@@ -47,6 +47,8 @@ class Eiger(object):
         self.photon_energy = photon_energy
         self.eigerclient.setDetectorConfig("threshold_energy", threshold) # added
         self.threshold = threshold # added
+        # FIXME: disable compression until we get lz4 support in libhdf5 !!
+        self.eigerclient.setFileWriterConfig('compression_enabled', False)
         self.initialized = True
         self.expose(0.001, 1)
         print "EIGER successfully Initialized for " + str(photon_energy/1000.0) + "keV, using threshold: "+str(threshold/1000.0) +"keV"
