@@ -1,5 +1,6 @@
 from cam_ctrl import eiger
-from dev-34idc import shttr
+from dev_34idc import shttr
+import sys
 
 
 def loopscan(ct, nimg=1, storage_path='/home/chx/data'):
@@ -14,7 +15,8 @@ def loopscan(ct, nimg=1, storage_path='/home/chx/data'):
         eiger.expose(ct, nimg)
     except:
         shttr.close()
-        raise "Bailing out! Exposure failed!!!"
+        print 'eiger.expose() error: ', sys.exc_info()[0]
+        raise Exception("Bailing out! Exposure failed!!!")
     shttr.close()
     eiger.download_data(storage_path)
 
